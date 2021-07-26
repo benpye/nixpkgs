@@ -354,6 +354,13 @@ let
         };
       };
 
+      zfs = mkOption {
+        default = config.security.pam.zfs.enable;
+        type = types.bool;
+        description = ''
+        '';
+      };
+
       text = mkOption {
         type = types.nullOr types.lines;
         description = "Contents of the PAM service file.";
@@ -423,10 +430,13 @@ let
             || cfg.enableGnomeKeyring
             || cfg.googleAuthenticator.enable
             || cfg.gnupg.enable
-            || cfg.duoSecurity.enable)) ''
+            || cfg.duoSecurity.enable
+            || cfg.zfs)) ''
               auth required pam_unix.so ${optionalString cfg.allowNullPassword "nullok"} ${optionalString cfg.nodelay "nodelay"} likeauth
               ${optionalString config.security.pam.enableEcryptfs
                 "auth optional ${pkgs.ecryptfs}/lib/security/pam_ecryptfs.so unwrap"}
+              ${let zfs = config.security.pam.zfs; in optionalString cfg.zfs
+                "auth optional ${config.boot.zfs.package}/lib/security/pam_zfs_key.so homes=${zfs.homes}"}
               ${optionalString cfg.pamMount
                 "auth optional ${pkgs.pam_mount}/lib/security/pam_mount.so"}
               ${optionalString cfg.enableKwallet
@@ -462,6 +472,8 @@ let
           password sufficient pam_unix.so nullok sha512
           ${optionalString config.security.pam.enableEcryptfs
               "password optional ${pkgs.ecryptfs}/lib/security/pam_ecryptfs.so"}
+          ${let zfs = config.security.pam.zfs; in optionalString cfg.zfs
+              "password optional ${config.boot.zfs.package}/lib/security/pam_zfs_key.so homes=${zfs.homes}"}
           ${optionalString cfg.pamMount
               "password optional ${pkgs.pam_mount}/lib/security/pam_mount.so"}
           ${optionalString use_ldap
@@ -488,6 +500,10 @@ let
               "session required ${pkgs.pam}/lib/security/pam_lastlog.so silent"}
           ${optionalString config.security.pam.enableEcryptfs
               "session optional ${pkgs.ecryptfs}/lib/security/pam_ecryptfs.so"}
+          ${let zfs = config.security.pam.zfs; in optionalString cfg.zfs ''
+              session [success=1 default=ignore] pam_succeed_if.so service = systemd-user
+              session optional ${config.boot.zfs.package}/lib/security/pam_zfs_key.so homes=${zfs.homes} ${optionalString zfs.noUnmount "nounmount"}
+          ''}
           ${optionalString cfg.pamMount
               "session optional ${pkgs.pam_mount}/lib/security/pam_mount.so"}
           ${optionalString use_ldap
@@ -828,6 +844,29 @@ in
       };
     };
 
+    security.pam.zfs = {
+      enable = mkOption {
+        default = false;
+        type = types.bool;
+        description = ''
+        '';
+      };
+
+      homes = mkOption {
+        example = "rpool/home";
+        default = "rpool/home";
+        type = types.str;
+        description = "";
+      };
+
+      noUnmount = mkOption {
+        default = false;
+        type = types.bool;
+        description = ''
+        '';
+      };
+    };
+
     security.pam.enableEcryptfs = mkEnableOption "eCryptfs PAM module (mounting ecryptfs home directory on login)";
 
     users.motd = mkOption {
@@ -969,6 +1008,9 @@ in
       '' +
       optionalString config.virtualisation.lxc.lxcfs.enable ''
         mr ${pkgs.lxc}/lib/security/pam_cgfs.so
+      '' +
+      optionalString (isEnabled (cfg: cfg.zfs)) ''
+        mr ${config.boot.zfs.package}/lib/security/pam_zfs_key.so,
       '';
   };
 
